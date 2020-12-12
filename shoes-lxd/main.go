@@ -146,7 +146,19 @@ func (l LXDClient) DeleteInstance(ctx context.Context, req *pb.DeleteInstanceReq
 	}
 	instanceName := req.CloudId
 
-	op, err := l.client.DeleteInstance(instanceName)
+	reqState := api.InstanceStatePut{
+		Action: "stop",
+		Timeout: -1,
+	}
+	op, err := l.client.UpdateInstanceState(instanceName, reqState, "")
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to stop instance: %+v", err)
+	}
+	if err := op.Wait(); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to wait stopping instance: %+v", err)
+	}
+
+	op, err = l.client.DeleteInstance(instanceName)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to delete instance: %+v", err)
 	}
