@@ -104,7 +104,10 @@ func (l LXDClient) AddInstance(ctx context.Context, req *pb.AddInstanceRequest) 
 		Name: req.RunnerName,
 		Source: api.InstanceSource{
 			Type:  "image",
-			Alias: "ubuntu",
+			Properties: map[string]string{
+				"os": "ubuntu",
+				"release": "bionic",
+			},
 		},
 	}
 	op, err := l.client.CreateInstance(reqInstance)
