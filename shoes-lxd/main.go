@@ -23,9 +23,13 @@ import (
 
 // Environment key values
 const (
+	// required variables
 	EnvLXDHost       = "LXD_HOST"
 	EnvLXDClientCert = "LXD_CLIENT_CERT"
 	EnvLXDClientKey  = "LXD_CLIENT_KEY"
+
+	// optional variables
+	EnvLXDImageAlias = "LXD_IMAGE_ALIAS"
 )
 
 func main() {
@@ -97,18 +101,27 @@ func (l LXDClient) AddInstance(ctx context.Context, req *pb.AddInstanceRequest) 
 		"user.user-data":      req.SetupScript,
 	}
 
+	var is api.InstanceSource
+	if strings.EqualFold(os.Getenv(EnvLXDImageAlias), "") {
+		is = api.InstanceSource{
+			Properties: map[string]string{
+				"os":      "ubuntu",
+				"release": "bionic",
+			},
+		}
+	} else {
+		is = api.InstanceSource{
+			Type:  "image",
+			Alias: os.Getenv(EnvLXDImageAlias),
+		}
+	}
+
 	reqInstance := api.InstancesPost{
 		InstancePut: api.InstancePut{
 			Config: instanceConfig,
 		},
-		Name: req.RunnerName,
-		Source: api.InstanceSource{
-			Type:  "image",
-			Properties: map[string]string{
-				"os": "ubuntu",
-				"release": "bionic",
-			},
-		},
+		Name:   req.RunnerName,
+		Source: is,
 	}
 	op, err := l.client.CreateInstance(reqInstance)
 	if err != nil {
@@ -150,7 +163,7 @@ func (l LXDClient) DeleteInstance(ctx context.Context, req *pb.DeleteInstanceReq
 	instanceName := req.CloudId
 
 	reqState := api.InstanceStatePut{
-		Action: "stop",
+		Action:  "stop",
 		Timeout: -1,
 	}
 	op, err := l.client.UpdateInstanceState(instanceName, reqState, "")
