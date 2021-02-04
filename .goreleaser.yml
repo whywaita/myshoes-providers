@@ -13,8 +13,3 @@ builds:
       - linux
     goarch:
       - amd64
-archives:
-  - builds:
-    - shoes-lxd
-    - shoes-openstack
-    format: binary
