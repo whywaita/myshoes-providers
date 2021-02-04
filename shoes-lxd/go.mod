@@ -4,6 +4,7 @@ go 1.15
 
 require (
 	github.com/flosch/pongo2 v0.0.0-00010101000000-000000000000 // indirect
+	github.com/flosch/pongo2/v4 v4.0.2 // indirect
 	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/hashicorp/go-plugin v1.4.0
 	github.com/lxc/lxd v0.0.0-20201022204652-7b6b82fe4d71

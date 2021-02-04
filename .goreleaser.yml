@@ -1,14 +1,18 @@
 builds:
-  - main: ./shoes-lxd/main.go
+  - dir: shoes-lxd
     id: "lxd"
     binary: shoes-lxd
     goos:
       - linux
-  - main: ./shoes-openstack/main.go
+    goarch:
+      - amd64
+  - dir: shoes-openstack
     id: "openstack"
     binary: shoes-openstack
     goos:
       - linux
+    goarch:
+      - amd64
 archives:
   - builds:
     - shoes-lxd
