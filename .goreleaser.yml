@@ -1,0 +1,16 @@
+builds:
+  - main: ./shoes-lxd/main.go
+    id: "lxd"
+    binary: shoes-lxd
+    goos:
+      - linux
+  - main: ./shoes-openstack/main.go
+    id: "openstack"
+    binary: shoes-openstack
+    goos:
+      - linux
+archives:
+  - builds:
+    - shoes-lxd
+    - shoes-openstack
+    format: binary
