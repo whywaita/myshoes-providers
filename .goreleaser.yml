@@ -9,3 +9,8 @@ builds:
     binary: shoes-openstack
     goos:
       - linux
+archives:
+  - builds:
+    - shoes-lxd
+    - shoes-openstack
+    format: binary
