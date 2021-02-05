@@ -33,4 +33,4 @@ jobs:
           GO111MODULE=off GOBIN=$(pwd)/bin go get github.com/tcnksm/ghr
           TAG_NAME=${GITHUB_REF##*/}
 
-          bin/ghr ${TAG_NAME} _output
+          bin/ghr -replace -draft ${TAG_NAME} _output
