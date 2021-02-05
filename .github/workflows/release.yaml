@@ -22,6 +22,8 @@ jobs:
         with:
           go-version: 1.15
       - name: release binaries
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p _output
           cd ${{ matrix.target }}
@@ -31,4 +33,4 @@ jobs:
           GO111MODULE=off GOBIN=$(pwd)/bin go get github.com/tcnksm/ghr
           TAG_NAME=${GITHUB_REF##*/}
 
-          ghr ${TAG_NAME} _output
+          bin/ghr ${TAG_NAME} _output
