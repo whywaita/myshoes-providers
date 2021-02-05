@@ -7,11 +7,6 @@ on:
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        target:
-          - shoes-lxd
-          - shoes-openstack
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -26,9 +21,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p _output
-          cd ${{ matrix.target }}
-          go build -o ../_output .
-          cd ../
+          ls | grep shoes | tr -d '/' | xargs -I%% bash -c "cd %%; go build -o ../_output ."
 
           GO111MODULE=off GOBIN=$(pwd)/bin go get github.com/tcnksm/ghr
           TAG_NAME=${GITHUB_REF##*/}
