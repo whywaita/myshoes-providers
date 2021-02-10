@@ -95,9 +95,14 @@ func (l LXDClient) AddInstance(ctx context.Context, req *pb.AddInstanceRequest) 
 		return nil, status.Errorf(codes.InvalidArgument, "failed to parse request name: %+v", err)
 	}
 
+	rawLXCConfig := `lxc.apparmor.profile = unconfined
+lxc.cgroup.devices.allow = a
+lxc.cap.drop=`
+
 	instanceConfig := map[string]string{
 		"security.nesting":    "true",
 		"security.privileged": "true",
+		"raw.lxc":             rawLXCConfig,
 		"user.user-data":      req.SetupScript,
 	}
 
