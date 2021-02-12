@@ -3,11 +3,15 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
+	"strconv"
 	"strings"
+
+	"github.com/whywaita/myshoes/pkg/datastore"
 
 	"github.com/hashicorp/go-plugin"
 	lxd "github.com/lxc/lxd/client"
@@ -29,7 +33,8 @@ const (
 	EnvLXDClientKey  = "LXD_CLIENT_KEY"
 
 	// optional variables
-	EnvLXDImageAlias = "LXD_IMAGE_ALIAS"
+	EnvLXDImageAlias          = "LXD_IMAGE_ALIAS"
+	EnvLXDResourceTypeMapping = "LXC_RESOURCE_TYPE_MAPPING"
 )
 
 func main() {
@@ -87,6 +92,8 @@ func (l *LXDPlugin) GRPCClient(ctx context.Context, broker *plugin.GRPCBroker, c
 // LXDClient is a client for lxd.
 type LXDClient struct {
 	client lxd.InstanceServer
+
+	config config
 }
 
 // AddInstance add a lxd instance.
@@ -104,6 +111,11 @@ lxc.cap.drop=`
 		"security.privileged": "true",
 		"raw.lxc":             rawLXCConfig,
 		"user.user-data":      req.SetupScript,
+	}
+
+	if mapping, ok := l.config.resourceMapping[req.ResourceType]; ok {
+		instanceConfig["limits.cpu"] = strconv.Itoa(mapping.CPUCore)
+		instanceConfig["limits.memory"] = mapping.Memory
 	}
 
 	var is api.InstanceSource
@@ -206,6 +218,7 @@ func New(c config) (*LXDClient, error) {
 
 	return &LXDClient{
 		client: conn,
+		config: c,
 	}, nil
 }
 
@@ -215,6 +228,14 @@ type config struct {
 	lxdHost       string
 	lxdClientCert string
 	lxdClientKey  string
+
+	resourceMapping map[pb.ResourceType]Mapping
+}
+
+type Mapping struct {
+	ResourceTypeName string `json:"resource_type_name"`
+	CPUCore          int    `json:"cpu"`
+	Memory           string `json:"memory"`
 }
 
 func loadConfig() (config, error) {
@@ -244,5 +265,33 @@ func loadConfig() (config, error) {
 	c.lxdClientCert = string(lxdClientCert)
 	c.lxdClientKey = string(lxdClientKey)
 
+	envMappingJSON := os.Getenv(EnvLXDResourceTypeMapping)
+	if envMappingJSON != "" {
+		m, err := readResourceTypeMapping(envMappingJSON)
+		if err != nil {
+			return config{}, fmt.Errorf("failed to read %s: %w", EnvLXDResourceTypeMapping, err)
+		}
+		c.resourceMapping = m
+	}
+
 	return c, nil
+}
+
+func readResourceTypeMapping(env string) (map[pb.ResourceType]Mapping, error) {
+	var mapping []Mapping
+	if err := json.Unmarshal([]byte(env), &mapping); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal JSON: %w", err)
+	}
+
+	r := map[pb.ResourceType]Mapping{}
+	for _, m := range mapping {
+		rt := datastore.UnmarshalResourceType(m.ResourceTypeName)
+		if rt == datastore.ResourceTypeUnknown {
+			return nil, fmt.Errorf("%s is invalid resource type", m.ResourceTypeName)
+		}
+
+		r[rt.ToPb()] = m
+	}
+
+	return r, nil
 }
