@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/go-plugin"
 	lxd "github.com/lxc/lxd/client"
@@ -42,6 +44,8 @@ const (
 )
 
 func main() {
+	rand.Seed(time.Now().UnixNano())
+
 	if err := run(); err != nil {
 		log.Fatal(err)
 	}
@@ -106,8 +110,8 @@ func (c *LXDClient) scheduleHost() LXDHost {
 		return c.hosts[0]
 	}
 
-	// TODO: implement schedule
-	return c.hosts[0]
+	index := rand.Intn(len(c.hosts) - 1) // scheduling algorithm
+	return c.hosts[index]
 }
 
 // LXDHost is define of host
@@ -287,6 +291,10 @@ func loadConfig() ([]hostConfig, map[pb.ResourceType]Mapping, error) {
 	hosts, err := loadHostsConfig()
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to load LXD host config: %w", err)
+	}
+
+	if len(hosts) <= 0 {
+		return nil, nil, fmt.Errorf("must set LXD host config")
 	}
 
 	envMappingJSON := os.Getenv(EnvLXDResourceTypeMapping)
