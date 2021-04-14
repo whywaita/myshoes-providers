@@ -7,17 +7,18 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"os"
 	"strconv"
 	"strings"
-
-	"github.com/whywaita/myshoes/pkg/datastore"
+	"time"
 
 	"github.com/hashicorp/go-plugin"
 	lxd "github.com/lxc/lxd/client"
 	"github.com/lxc/lxd/shared/api"
 
 	pb "github.com/whywaita/myshoes/api/proto"
+	"github.com/whywaita/myshoes/pkg/datastore"
 	"github.com/whywaita/myshoes/pkg/runner"
 
 	"google.golang.org/grpc"
@@ -27,17 +28,24 @@ import (
 
 // Environment key values
 const (
-	// required variables
+	// worker definition
+
+	// for single node
 	EnvLXDHost       = "LXD_HOST"
 	EnvLXDClientCert = "LXD_CLIENT_CERT"
 	EnvLXDClientKey  = "LXD_CLIENT_KEY"
 
+	// for multi nodes
+	EnvLXDHosts = "LXD_HOSTS"
+
 	// optional variables
 	EnvLXDImageAlias          = "LXD_IMAGE_ALIAS"
-	EnvLXDResourceTypeMapping = "LXC_RESOURCE_TYPE_MAPPING"
+	EnvLXDResourceTypeMapping = "LXD_RESOURCE_TYPE_MAPPING"
 )
 
 func main() {
+	rand.Seed(time.Now().UnixNano())
+
 	if err := run(); err != nil {
 		log.Fatal(err)
 	}
@@ -69,12 +77,12 @@ type LXDPlugin struct {
 
 // GRPCServer is implement gRPC Server.
 func (l *LXDPlugin) GRPCServer(broker *plugin.GRPCBroker, s *grpc.Server) error {
-	c, err := loadConfig()
+	hostsConfig, mapping, err := loadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	client, err := New(c)
+	client, err := New(hostsConfig, mapping)
 	if err != nil {
 		return fmt.Errorf("failed to create client: %w", err)
 	}
@@ -91,9 +99,71 @@ func (l *LXDPlugin) GRPCClient(ctx context.Context, broker *plugin.GRPCBroker, c
 
 // LXDClient is a client for lxd.
 type LXDClient struct {
+	hosts []LXDHost
+
+	resourceMapping map[pb.ResourceType]Mapping
+}
+
+// scheduleHost extract host in workers
+func (c *LXDClient) scheduleHost() LXDHost {
+	if len(c.hosts) == 1 {
+		return c.hosts[0]
+	}
+
+	index := rand.Intn(len(c.hosts)) // scheduling algorithm
+	return c.hosts[index]
+}
+
+// LXDHost is define of host
+type LXDHost struct {
 	client lxd.InstanceServer
 
-	config config
+	config hostConfig
+}
+
+type hostConfig struct {
+	cert tls.Certificate
+
+	lxdHost       string
+	lxdClientCert string
+	lxdClientKey  string
+}
+
+// Mapping is resource mapping
+type Mapping struct {
+	ResourceTypeName string `json:"resource_type_name"`
+	CPUCore          int    `json:"cpu"`
+	Memory           string `json:"memory"`
+}
+
+// parseAlias parse user input
+func parseAlias(input string) api.InstanceSource {
+	if strings.EqualFold(input, "") {
+		// default value is ubuntu:bionic
+		return api.InstanceSource{
+			Type: "image",
+			Properties: map[string]string{
+				"os":      "ubuntu",
+				"release": "bionic",
+			},
+		}
+	}
+
+	s := strings.Split(input, ":")
+	if len(s) == 2 {
+		// <FQDN or IP>:<alias>
+		return api.InstanceSource{
+			Type:   "image",
+			Mode:   "pull",
+			Server: fmt.Sprintf("https://%s:8443", s[0]),
+			Alias:  s[1],
+		}
+	}
+
+	return api.InstanceSource{
+		Type:  "image",
+		Alias: input,
+	}
 }
 
 // AddInstance add a lxd instance.
@@ -113,34 +183,22 @@ lxc.cap.drop=`
 		"user.user-data":      req.SetupScript,
 	}
 
-	if mapping, ok := l.config.resourceMapping[req.ResourceType]; ok {
+	if mapping, ok := l.resourceMapping[req.ResourceType]; ok {
 		instanceConfig["limits.cpu"] = strconv.Itoa(mapping.CPUCore)
 		instanceConfig["limits.memory"] = mapping.Memory
 	}
 
-	var is api.InstanceSource
-	if strings.EqualFold(os.Getenv(EnvLXDImageAlias), "") {
-		is = api.InstanceSource{
-			Properties: map[string]string{
-				"os":      "ubuntu",
-				"release": "bionic",
-			},
-		}
-	} else {
-		is = api.InstanceSource{
-			Type:  "image",
-			Alias: os.Getenv(EnvLXDImageAlias),
-		}
-	}
+	client := l.scheduleHost().client
 
 	reqInstance := api.InstancesPost{
 		InstancePut: api.InstancePut{
 			Config: instanceConfig,
 		},
 		Name:   req.RunnerName,
-		Source: is,
+		Source: parseAlias(os.Getenv(EnvLXDImageAlias)),
 	}
-	op, err := l.client.CreateInstance(reqInstance)
+
+	op, err := client.CreateInstance(reqInstance)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create instance: %+v", err)
 	}
@@ -152,7 +210,7 @@ lxc.cap.drop=`
 		Action:  "start",
 		Timeout: -1,
 	}
-	op, err = l.client.UpdateInstanceState(req.RunnerName, reqState, "")
+	op, err = client.UpdateInstanceState(req.RunnerName, reqState, "")
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to start instance: %+v", err)
 	}
@@ -160,7 +218,7 @@ lxc.cap.drop=`
 		return nil, status.Errorf(codes.Internal, "failed to wait starting instance: %+v", err)
 	}
 
-	i, _, err := l.client.GetInstance(req.RunnerName)
+	i, _, err := client.GetInstance(req.RunnerName)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to retrieve instance information: %+v", err)
 	}
@@ -179,11 +237,25 @@ func (l LXDClient) DeleteInstance(ctx context.Context, req *pb.DeleteInstanceReq
 	}
 	instanceName := req.CloudId
 
+	var client lxd.InstanceServer
+	client = nil
+
+	for _, host := range l.hosts {
+		_, _, err := host.client.GetInstance(instanceName)
+		if err == nil {
+			// found LXD worker
+			client = host.client
+		}
+	}
+	if client == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "failed to found worker that has %s", instanceName)
+	}
+
 	reqState := api.InstanceStatePut{
 		Action:  "stop",
 		Timeout: -1,
 	}
-	op, err := l.client.UpdateInstanceState(instanceName, reqState, "")
+	op, err := client.UpdateInstanceState(instanceName, reqState, "")
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to stop instance: %+v", err)
 	}
@@ -191,7 +263,7 @@ func (l LXDClient) DeleteInstance(ctx context.Context, req *pb.DeleteInstanceReq
 		return nil, status.Errorf(codes.Internal, "failed to wait stopping instance: %+v", err)
 	}
 
-	op, err = l.client.DeleteInstance(instanceName)
+	op, err = client.DeleteInstance(instanceName)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to delete instance: %+v", err)
 	}
@@ -203,44 +275,85 @@ func (l LXDClient) DeleteInstance(ctx context.Context, req *pb.DeleteInstanceReq
 }
 
 // New is create LXDClient
-func New(c config) (*LXDClient, error) {
-	args := &lxd.ConnectionArgs{
-		UserAgent:          "shoes-lxd",
-		TLSClientCert:      c.lxdClientCert,
-		TLSClientKey:       c.lxdClientKey,
-		InsecureSkipVerify: true,
-	}
+func New(hc []hostConfig, m map[pb.ResourceType]Mapping) (*LXDClient, error) {
+	var hosts []LXDHost
 
-	conn, err := lxd.ConnectLXD(c.lxdHost, args)
-	if err != nil {
-		return nil, err
+	for _, h := range hc {
+		args := &lxd.ConnectionArgs{
+			UserAgent:          "shoes-lxd",
+			TLSClientCert:      h.lxdClientCert,
+			TLSClientKey:       h.lxdClientKey,
+			InsecureSkipVerify: true,
+		}
+
+		conn, err := lxd.ConnectLXD(h.lxdHost, args)
+		if err != nil {
+			return nil, err
+		}
+
+		hosts = append(hosts, LXDHost{
+			client: conn,
+			config: h,
+		})
 	}
 
 	return &LXDClient{
-		client: conn,
-		config: c,
+		hosts:           hosts,
+		resourceMapping: m,
 	}, nil
 }
 
-type config struct {
-	cert tls.Certificate
+func loadConfig() ([]hostConfig, map[pb.ResourceType]Mapping, error) {
+	hosts, err := loadHostsConfig()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to load LXD host config: %w", err)
+	}
 
-	lxdHost       string
-	lxdClientCert string
-	lxdClientKey  string
+	if len(hosts) <= 0 {
+		return nil, nil, fmt.Errorf("must set LXD host config")
+	}
 
-	resourceMapping map[pb.ResourceType]Mapping
+	envMappingJSON := os.Getenv(EnvLXDResourceTypeMapping)
+	var m map[pb.ResourceType]Mapping
+	if envMappingJSON != "" {
+		m, err = readResourceTypeMapping(envMappingJSON)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to read %s: %w", EnvLXDResourceTypeMapping, err)
+		}
+	}
+
+	return hosts, m, nil
 }
 
-type Mapping struct {
-	ResourceTypeName string `json:"resource_type_name"`
-	CPUCore          int    `json:"cpu"`
-	Memory           string `json:"memory"`
+func loadHostsConfig() ([]hostConfig, error) {
+	if strings.EqualFold(os.Getenv(EnvLXDHosts), "") {
+		return loadSingleHostConfig()
+	}
+
+	return loadMultiHostsConfig()
 }
 
-func loadConfig() (config, error) {
-	var c config
+func newHostConfig(ip, pathCert, pathKey string) (*hostConfig, error) {
+	var host hostConfig
 
+	host.lxdHost = ip
+
+	lxdClientCert, err := ioutil.ReadFile(pathCert)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read %s: %w", pathCert, err)
+	}
+	lxdClientKey, err := ioutil.ReadFile(pathKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read %s: %w", pathKey, err)
+	}
+
+	host.lxdClientCert = string(lxdClientCert)
+	host.lxdClientKey = string(lxdClientKey)
+
+	return &host, nil
+}
+
+func loadSingleHostConfig() ([]hostConfig, error) {
 	var unsetValues []string
 	for _, e := range []string{EnvLXDHost, EnvLXDClientCert, EnvLXDClientKey} {
 		if os.Getenv(e) == "" {
@@ -248,33 +361,46 @@ func loadConfig() (config, error) {
 		}
 	}
 	if len(unsetValues) != 0 {
-		return config{}, fmt.Errorf("must be set %s", strings.Join(unsetValues, ", "))
+		return nil, fmt.Errorf("must be set %s", strings.Join(unsetValues, ", "))
 	}
 
-	c.lxdHost = os.Getenv(EnvLXDHost)
+	ip := os.Getenv(EnvLXDHost)
+	pathCert := os.Getenv(EnvLXDClientCert)
+	pathKey := os.Getenv(EnvLXDClientKey)
 
-	lxdClientCert, err := ioutil.ReadFile(os.Getenv(EnvLXDClientCert))
+	host, err := newHostConfig(ip, pathCert, pathKey)
 	if err != nil {
-		return config{}, fmt.Errorf("failed to read %s: %w", EnvLXDClientCert, err)
-	}
-	lxdClientKey, err := ioutil.ReadFile(os.Getenv(EnvLXDClientKey))
-	if err != nil {
-		return config{}, fmt.Errorf("failed to read %s: %w", EnvLXDClientKey, err)
+		return nil, fmt.Errorf("failed to create hostConfig: %w", err)
 	}
 
-	c.lxdClientCert = string(lxdClientCert)
-	c.lxdClientKey = string(lxdClientKey)
+	return []hostConfig{*host}, nil
+}
 
-	envMappingJSON := os.Getenv(EnvLXDResourceTypeMapping)
-	if envMappingJSON != "" {
-		m, err := readResourceTypeMapping(envMappingJSON)
+type multiNode struct {
+	IPAddress  string `json:"host"`
+	ClientCert string `json:"client_cert"`
+	ClientKey  string `json:"client_key"`
+}
+
+func loadMultiHostsConfig() ([]hostConfig, error) {
+	multiNodeJSON := os.Getenv(EnvLXDHosts)
+	var mn []multiNode
+
+	if err := json.Unmarshal([]byte(multiNodeJSON), &mn); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal %s: %w", EnvLXDHosts, err)
+	}
+
+	var hostConfigs []hostConfig
+	for _, node := range mn {
+		host, err := newHostConfig(node.IPAddress, node.ClientCert, node.ClientKey)
 		if err != nil {
-			return config{}, fmt.Errorf("failed to read %s: %w", EnvLXDResourceTypeMapping, err)
+			return nil, fmt.Errorf("failed to create hostConfig: %w", err)
 		}
-		c.resourceMapping = m
+
+		hostConfigs = append(hostConfigs, *host)
 	}
 
-	return c, nil
+	return hostConfigs, nil
 }
 
 func readResourceTypeMapping(env string) (map[pb.ResourceType]Mapping, error) {
