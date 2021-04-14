@@ -110,7 +110,7 @@ func (c *LXDClient) scheduleHost() LXDHost {
 		return c.hosts[0]
 	}
 
-	index := rand.Intn(len(c.hosts) - 1) // scheduling algorithm
+	index := rand.Intn(len(c.hosts)) // scheduling algorithm
 	return c.hosts[index]
 }
 
@@ -188,6 +188,8 @@ lxc.cap.drop=`
 		instanceConfig["limits.memory"] = mapping.Memory
 	}
 
+	client := l.scheduleHost().client
+
 	reqInstance := api.InstancesPost{
 		InstancePut: api.InstancePut{
 			Config: instanceConfig,
@@ -196,7 +198,7 @@ lxc.cap.drop=`
 		Source: parseAlias(os.Getenv(EnvLXDImageAlias)),
 	}
 
-	op, err := l.scheduleHost().client.CreateInstance(reqInstance)
+	op, err := client.CreateInstance(reqInstance)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create instance: %+v", err)
 	}
@@ -208,7 +210,7 @@ lxc.cap.drop=`
 		Action:  "start",
 		Timeout: -1,
 	}
-	op, err = l.scheduleHost().client.UpdateInstanceState(req.RunnerName, reqState, "")
+	op, err = client.UpdateInstanceState(req.RunnerName, reqState, "")
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to start instance: %+v", err)
 	}
@@ -216,7 +218,7 @@ lxc.cap.drop=`
 		return nil, status.Errorf(codes.Internal, "failed to wait starting instance: %+v", err)
 	}
 
-	i, _, err := l.scheduleHost().client.GetInstance(req.RunnerName)
+	i, _, err := client.GetInstance(req.RunnerName)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to retrieve instance information: %+v", err)
 	}
@@ -235,11 +237,25 @@ func (l LXDClient) DeleteInstance(ctx context.Context, req *pb.DeleteInstanceReq
 	}
 	instanceName := req.CloudId
 
+	var client lxd.InstanceServer
+	client = nil
+
+	for _, host := range l.hosts {
+		_, _, err := host.client.GetInstance(instanceName)
+		if err == nil {
+			// found LXD worker
+			client = host.client
+		}
+	}
+	if client == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "failed to found worker that has %s", instanceName)
+	}
+
 	reqState := api.InstanceStatePut{
 		Action:  "stop",
 		Timeout: -1,
 	}
-	op, err := l.scheduleHost().client.UpdateInstanceState(instanceName, reqState, "")
+	op, err := client.UpdateInstanceState(instanceName, reqState, "")
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to stop instance: %+v", err)
 	}
@@ -247,7 +263,7 @@ func (l LXDClient) DeleteInstance(ctx context.Context, req *pb.DeleteInstanceReq
 		return nil, status.Errorf(codes.Internal, "failed to wait stopping instance: %+v", err)
 	}
 
-	op, err = l.scheduleHost().client.DeleteInstance(instanceName)
+	op, err = client.DeleteInstance(instanceName)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to delete instance: %+v", err)
 	}
