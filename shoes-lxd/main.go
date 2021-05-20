@@ -166,11 +166,25 @@ func parseAlias(input string) api.InstanceSource {
 	}
 }
 
+// isExistInstance search created instance in same name
+func (l LXDClient) isExistInstance(instanceName string) (lxd.InstanceServer, bool) {
+	for _, host := range l.hosts {
+		_, _, err := host.client.GetInstance(instanceName)
+		if err == nil {
+			// found LXD worker
+			return host.client, true
+		}
+	}
+
+	return nil, false
+}
+
 // AddInstance add a lxd instance.
 func (l LXDClient) AddInstance(ctx context.Context, req *pb.AddInstanceRequest) (*pb.AddInstanceResponse, error) {
 	if _, err := runner.ToUUID(req.RunnerName); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "failed to parse request name: %+v", err)
 	}
+	instanceName := req.RunnerName
 
 	rawLXCConfig := `lxc.apparmor.profile = unconfined
 lxc.cgroup.devices.allow = a
@@ -188,29 +202,32 @@ lxc.cap.drop=`
 		instanceConfig["limits.memory"] = mapping.Memory
 	}
 
-	client := l.scheduleHost().client
+	client, found := l.isExistInstance(instanceName)
+	if !found {
+		client = l.scheduleHost().client
 
-	reqInstance := api.InstancesPost{
-		InstancePut: api.InstancePut{
-			Config: instanceConfig,
-		},
-		Name:   req.RunnerName,
-		Source: parseAlias(os.Getenv(EnvLXDImageAlias)),
-	}
+		reqInstance := api.InstancesPost{
+			InstancePut: api.InstancePut{
+				Config: instanceConfig,
+			},
+			Name:   instanceName,
+			Source: parseAlias(os.Getenv(EnvLXDImageAlias)),
+		}
 
-	op, err := client.CreateInstance(reqInstance)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to create instance: %+v", err)
-	}
-	if err := op.Wait(); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to wait creating instance: %+v", err)
+		op, err := client.CreateInstance(reqInstance)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to create instance: %+v", err)
+		}
+		if err := op.Wait(); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to wait creating instance: %+v", err)
+		}
 	}
 
 	reqState := api.InstanceStatePut{
 		Action:  "start",
 		Timeout: -1,
 	}
-	op, err = client.UpdateInstanceState(req.RunnerName, reqState, "")
+	op, err := client.UpdateInstanceState(instanceName, reqState, "")
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to start instance: %+v", err)
 	}
@@ -218,7 +235,7 @@ lxc.cap.drop=`
 		return nil, status.Errorf(codes.Internal, "failed to wait starting instance: %+v", err)
 	}
 
-	i, _, err := client.GetInstance(req.RunnerName)
+	i, _, err := client.GetInstance(instanceName)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to retrieve instance information: %+v", err)
 	}
@@ -237,17 +254,8 @@ func (l LXDClient) DeleteInstance(ctx context.Context, req *pb.DeleteInstanceReq
 	}
 	instanceName := req.CloudId
 
-	var client lxd.InstanceServer
-	client = nil
-
-	for _, host := range l.hosts {
-		_, _, err := host.client.GetInstance(instanceName)
-		if err == nil {
-			// found LXD worker
-			client = host.client
-		}
-	}
-	if client == nil {
+	client, found := l.isExistInstance(instanceName)
+	if !found {
 		return nil, status.Errorf(codes.InvalidArgument, "failed to found worker that has %s", instanceName)
 	}
 
@@ -274,7 +282,7 @@ func (l LXDClient) DeleteInstance(ctx context.Context, req *pb.DeleteInstanceReq
 	return &pb.DeleteInstanceResponse{}, nil
 }
 
-// New is create LXDClient
+// New create LXDClient
 func New(hc []hostConfig, m map[pb.ResourceType]Mapping) (*LXDClient, error) {
 	var hosts []LXDHost
 
