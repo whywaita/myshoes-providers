@@ -15,6 +15,14 @@ jobs:
           sudo unzip packer_1.7.0_linux_amd64.zip
           sudo mv ./packer /tmp/packer
       - uses: actions/checkout@v2
+      - name: Delete unused file
+        run: |
+          sudo rm -rf /opt/hostedtoolcache
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/*
+          sudo rm -rf /var/lib/docker/*
+          # ignore /usr/share/dpkg
+          ls /usr/share/ | grep -v dpkg | xargs -I%% sudo rm -rf /usr/share/%%
 
       - name: Download whywaita/virtual-environments-lxd
         id: download
