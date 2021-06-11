@@ -5,7 +5,7 @@ on:
 
 jobs:
   build-lxd:
-    runs: ubuntu-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: whywaita/setup-lxd@v1
       - name: setup-packer
