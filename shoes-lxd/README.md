@@ -40,7 +40,7 @@ use `LXD_HOSTS` and ignore `LXD_HOST` if set both.
 - `LXD_IMAGE_ALIAS`
   - set runner image alias
   - default: `ubuntu:bionic`
-  - e.g.) `ubuntu:focal`, `192.0.2.100:ubuntu-custom`
+  - e.g.) for remote image server: `https://192.0.2.110:8443/ubuntu-custom`
 - `LXD_RESOURCE_TYPE_MAPPING`
   - mapping `resource_type` and CPU / Memory.
   - need JSON format. keys is `resource_type_name`, `cpu`, `memory`.
