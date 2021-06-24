@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"log"
 	"math/rand"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -137,7 +138,7 @@ type Mapping struct {
 }
 
 // parseAlias parse user input
-func parseAlias(input string) api.InstanceSource {
+func parseAlias(input string) (api.InstanceSource, error) {
 	if strings.EqualFold(input, "") {
 		// default value is ubuntu:bionic
 		return api.InstanceSource{
@@ -146,24 +147,34 @@ func parseAlias(input string) api.InstanceSource {
 				"os":      "ubuntu",
 				"release": "bionic",
 			},
-		}
+		}, nil
 	}
 
-	s := strings.Split(input, ":")
-	if len(s) == 2 {
-		// <FQDN or IP>:<alias>
+	if strings.HasPrefix(input, "http") {
+		// https://<FQDN or IP>:8443/<alias>
+		u, err := url.Parse(input)
+		if err != nil {
+			return api.InstanceSource{}, fmt.Errorf("failed to parse alias: %w", err)
+		}
+
+		urlImageServer := fmt.Sprintf("%s://%s", u.Scheme, u.Host)
+		alias := strings.TrimPrefix(u.Path, "/")
+
+		fmt.Println(urlImageServer)
+		fmt.Println(alias)
+
 		return api.InstanceSource{
 			Type:   "image",
 			Mode:   "pull",
-			Server: fmt.Sprintf("https://%s:8443", s[0]),
-			Alias:  s[1],
-		}
+			Server: urlImageServer,
+			Alias:  alias,
+		}, nil
 	}
 
 	return api.InstanceSource{
 		Type:  "image",
 		Alias: input,
-	}
+	}, nil
 }
 
 // isExistInstance search created instance in same name
@@ -206,12 +217,17 @@ lxc.cap.drop=`
 	if !found {
 		client = l.scheduleHost().client
 
+		source, err := parseAlias(os.Getenv(EnvLXDImageAlias))
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "failed to parse %s: %+v", EnvLXDImageAlias, err)
+		}
+
 		reqInstance := api.InstancesPost{
 			InstancePut: api.InstancePut{
 				Config: instanceConfig,
 			},
 			Name:   instanceName,
-			Source: parseAlias(os.Getenv(EnvLXDImageAlias)),
+			Source: source,
 		}
 
 		op, err := client.CreateInstance(reqInstance)
