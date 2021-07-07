@@ -42,10 +42,12 @@ jobs:
 
       - name: packer validate packer.json
         run: |
-          /tmp/packer validate -syntax-only shoes-lxd/images/ubuntu2004.json
+          cd shoes-lxd/images
+          /tmp/packer validate -syntax-only ubuntu2004.json
       - name: packer build packer.json
         run: |
-          /tmp/packer build shoes-lxd/images/ubuntu2004.json
+          cd shoes-lxd/images
+          /tmp/packer build ubuntu2004.json
         env:
           PACKER_LOG: 1
 

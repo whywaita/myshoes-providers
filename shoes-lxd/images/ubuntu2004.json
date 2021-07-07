@@ -15,7 +15,7 @@
 			"type": "shell",
 			"execute_command": "sudo -S sh '{{.Path}}'",
 			"scripts": [
-        "./scripts/myshoes.sh"
+        "./shoes-lxd/images/scripts/myshoes.sh"
 			]
 		}
 	]
