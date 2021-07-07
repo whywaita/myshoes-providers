@@ -64,3 +64,7 @@ jobs:
           name: virtual-environments-focal-lxd-myshoes
           path: ./_output/*.zip
           retention-days: 5
+
+      - name: Run tmate
+        if: failure()
+        uses: mxschmitt/action-tmate@v3
