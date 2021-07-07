@@ -38,35 +38,36 @@ jobs:
       - name: Import virtual-environments
         run: |
           lxc image import _output/${{ steps.download.outputs.filename }} --alias virtual-environments-lxd
+          rm -f virtual-environments-lxd.zip artifact.zip
 
 
       - name: packer validate packer.json
         run: |
           cd shoes-lxd/images
           /tmp/packer validate -syntax-only ubuntu2004.json
-          #      - name: packer build packer.json
-          #        run: |
-          #          cd shoes-lxd/images
-          #          /tmp/packer build ubuntu2004.json
-          #        env:
-          #          PACKER_LOG: 1
-          #
-          #
-          #      - name: Export image
-          #        id: export
-          #        run: |
-          #          lxc image export virtual-environments-focal-myshoes ./_output
-          #          echo "::set-output name=artifact::$(basename $(ls *.tar.gz))"
-          #      - name: Compress image
-          #        run: |
-          #          zip -m ./_output/artifact.zip ./_output/*.tar.gz
-          #      - name: Upload artifact
-          #        uses: actions/upload-artifact@v2
-          #        with:
-          #          name: virtual-environments-focal-lxd-myshoes
-          #          path: ./_output/*.zip
-          #          retention-days: 5
+      - name: packer build packer.json
+        run: |
+          cd shoes-lxd/images
+          /tmp/packer build ubuntu2004.json
+        env:
+          PACKER_LOG: 1
+
+
+      - name: Export image
+        id: export
+        run: |
+          lxc image export virtual-environments-focal-myshoes ./_output
+          echo "::set-output name=artifact::$(basename $(ls *.tar.gz))"
+      - name: Compress image
+        run: |
+          zip -m ./_output/artifact.zip ./_output/*.tar.gz
+      - name: Upload artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: virtual-environments-focal-lxd-myshoes
+          path: ./_output/*.zip
+          retention-days: 5
 
       - name: Run tmate
-        if: always()
+        if: failure()
         uses: mxschmitt/action-tmate@v3
