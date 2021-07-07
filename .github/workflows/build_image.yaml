@@ -38,7 +38,7 @@ jobs:
       - name: Import virtual-environments
         run: |
           lxc image import _output/${{ steps.download.outputs.filename }} --alias virtual-environments-lxd
-          rm -rf virtual-environments-lxd.zip artifact.zip _ouput
+          rm -rf virtual-environments-lxd.zip artifact.zip _output/*
 
 
       - name: packer validate packer.json
