@@ -56,8 +56,8 @@ jobs:
       - name: Export image
         id: export
         run: |
-          lxc image export virtual-environments-focal-myshoes ./_output
-          echo "::set-output name=artifact::$(basename $(ls *.tar.gz))"
+          lxc image export virtual-environments-lxd ./_output
+          echo "::set-output name=artifact::$(basename $(ls _output/*.tar.gz))"
       - name: Compress image
         run: |
           zip -m ./_output/artifact.zip ./_output/*.tar.gz
