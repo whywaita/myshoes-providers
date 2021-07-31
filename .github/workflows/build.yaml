@@ -13,6 +13,7 @@ jobs:
         target:
           - shoes-lxd
           - shoes-openstack
+          - shoes-aws
     steps:
       - name: checkout
         uses: actions/checkout@v2
@@ -26,3 +27,25 @@ jobs:
         run: |
           cd ${{ matrix.target }}
           go build -o ${{ matrix.target }} .
+      - name: prepare test
+        run: |
+          mkdir -p ~/.aws
+          echo "[default]
+          region = us-west-2
+          " > ~/.aws/config
+
+          echo "[default]
+          aws_access_key_id = dummy
+          aws_secret_access_key = dummy
+          " > ~/.aws/credentials
+        if: ${{ matrix.target == 'shoes-aws' }}
+      - name: go test
+        run: |
+          cd ${{ matrix.target }}
+          go test -v ./...
+      - name: Dump docker logs on failure
+        if: failure()
+        uses: jwalton/gh-docker-logs@v1
+      - name: Run tmate
+        if: failure()
+        uses: mxschmitt/action-tmate@v3
