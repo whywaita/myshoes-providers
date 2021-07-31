@@ -27,6 +27,18 @@ jobs:
         run: |
           cd ${{ matrix.target }}
           go build -o ${{ matrix.target }} .
+      - name: prepare test
+        run: |
+          mkdir -p ~/.aws
+          echo "[default]
+          region = us-west-2
+          " > ~/.aws/config
+
+          echo "[default]
+          aws_access_key_id = dummy
+          aws_secret_access_key = dummy
+          " > ~/.aws/credentials
+        if: ${{ matrix.target == 'shoes-aws' }}
       - name: go test
         run: |
           cd ${{ matrix.target }}
