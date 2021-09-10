@@ -247,7 +247,7 @@ lxc.cap.drop=`
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to start instance: %+v", err)
 	}
-	if err := op.Wait(); err != nil {
+	if err := op.Wait(); err != nil && !strings.EqualFold(err.Error(), "The instance is already running") {
 		return nil, status.Errorf(codes.Internal, "failed to wait starting instance: %+v", err)
 	}
 
