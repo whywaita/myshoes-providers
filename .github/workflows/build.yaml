@@ -12,32 +12,19 @@ jobs:
       matrix:
         target:
           - shoes-openstack
-          - shoes-aws
     steps:
       - name: checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           fetch-depth: 1
       - name: setup go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v5
         with:
           go-version: 1.x
       - name: build check
         run: |
           cd ${{ matrix.target }}
           go build -o ${{ matrix.target }} .
-      - name: prepare test
-        run: |
-          mkdir -p ~/.aws
-          echo "[default]
-          region = us-west-2
-          " > ~/.aws/config
-
-          echo "[default]
-          aws_access_key_id = dummy
-          aws_secret_access_key = dummy
-          " > ~/.aws/credentials
-        if: ${{ matrix.target == 'shoes-aws' }}
       - name: go test
         run: |
           cd ${{ matrix.target }}
